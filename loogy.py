@@ -140,21 +140,104 @@ def main():
             ]
 
         # Step 6: Filter to keep only the events to consider
-            df_filtered = df[~df['event_name'].isin(events_to_skip)]
+            df['date'] = df['timestamp'].dt.date
 
-            # Step 7: Create event sequences for each user with filtered events
+        # Step 4: Filter the dataframe for 'first_open' event
+            first_open_df = df[df['event_name'] == 'first_open']
+
+            # Step 5: Get unique dates where 'first_open' event occurred
+            first_open_dates = first_open_df['date'].dropna().unique()
+
+            # Step 6: Add a sidebar selectbox for the user to pick a date from 'first_open' event dates
+            selected_date = st.sidebar.selectbox('Select Date (first_open users)', sorted(first_open_dates, reverse=False))
+
+            # Step 7: Filter the entire dataset based on the selected date
+            df_filtered = df[df['date'] == selected_date]
+
+            #st.write(f"Displaying data for the selected date: {selected_date}")
+
+            ### Step 1: First Pivot Table - Date-wise Unique Users (filtered by selected_date)
+            #datewise_users = df_filtered.groupby('date')['user_pseudo_id'].nunique().reset_index()
+            #datewise_users.columns = ['Date', 'Unique Users']
+
+            # Calculate the percentage of users for each date
+            #datewise_users['Percentage'] = (datewise_users['Unique Users'] / datewise_users['Unique Users'].sum()) * 100
+
+            #st.write("Date-wise Unique Users and Percentage (Filtered by Selected Date):")
+            #st.write(datewise_users.style.format({'Percentage': "{:.2f}%"}))
+
+            ### Step 2: Retention and Churn Percentage Calculation
+
+            # Filter for 'app_remove' event in the dataset
+            app_remove_df = df[df['event_name'] == 'app_remove']
+
+            # Count unique 'app_remove' users on the selected date
+            app_remove_users_count = app_remove_df[app_remove_df['date'] == selected_date]['user_pseudo_id'].nunique()
+
+            # Count unique 'first_open' users on the selected date
+            first_open_users_count = first_open_df[first_open_df['date'] == selected_date]['user_pseudo_id'].nunique()
+
+            ### NEW LOGIC FOR RETENTION:
+            # Find users who had 'first_open' on the selected date and came back the next day
+            next_day = pd.to_datetime(selected_date) + pd.Timedelta(days=1)
+            next_day_users = df[(df['date'] == next_day.date()) & (df['user_pseudo_id'].isin(first_open_df['user_pseudo_id']))]
+
+            # Count unique users who came back on the next day
+            next_day_users_count = next_day_users['user_pseudo_id'].nunique()
+
+            # Calculate retention and churn percentage
+            if first_open_users_count > 0:
+                Churn_percentage = (next_day_users_count / first_open_users_count) * 100
+                App_Remove_percentage = (app_remove_users_count / first_open_users_count) * 100
+            else:
+                Churn_percentage = 0
+                App_Remove_percentage = 0
+
+            ### Display Retention and Churn Percentage in Card Format
+
+            st.markdown(f"""
+                <div style="display: flex; justify-content: space-around; margin-top: 20px;">
+                    <div style="
+                        padding: 10px; 
+                        background-color: #e0f7fa; 
+                        border-radius: 10px; 
+                        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); 
+                        text-align: center;
+                        width: 40%;
+                    ">
+                        <h3 style="margin: 0;">Churn percentage</h3>
+                        <h2 style="margin: 0; color: #00796b;">{Churn_percentage:.2f}%</h2>
+                    </div>
+                    <div style="
+                        padding: 10px; 
+                        background-color: #ffebee; 
+                        border-radius: 10px; 
+                        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); 
+                        text-align: center;
+                        width: 40%;
+                    ">
+                        <h3 style="margin: 0;">AppRemove percentage</h3>
+                        <h2 style="margin: 0; color: #d32f2f;">{App_Remove_percentage:.2f}%</h2>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            ### Step 3: Event sequence table (Filtered by Selected Date)
             df_filtered['event_sequence'] = df_filtered.groupby('user_pseudo_id')['event_name'].transform(lambda x: ' -> '.join(x))
 
-            # Step 8: Drop duplicates to keep only unique sequences per user
+            # Drop duplicates to keep only unique sequences per user
             unique_sequences = df_filtered[['user_pseudo_id', 'event_sequence']].drop_duplicates()
 
+            # Group by event sequences and count users
             path_user_counts = unique_sequences.groupby('event_sequence')['user_pseudo_id'].nunique().reset_index()
             path_user_counts.columns = ['event_sequence', 'Total Users']
             path_user_counts = path_user_counts.sort_values(by='Total Users', ascending=False)
 
-            # Step 10: Display the results
-            st.write("Unique User Event Flows and User Counts (Filtered):")
+            # Display the event sequences and user counts
+            st.write("Unique User Event Flows and User Counts (Filtered by Selected Date):")
             st.dataframe(path_user_counts)
+
+
             # Step 9: Display the results: User IDs and their event sequences
             st.write("User IDs and Their Event Sequences (Filtered):")
             st.dataframe(unique_sequences)
@@ -226,8 +309,8 @@ def main():
             st.write("App removed Users event flow (Last 5 Events):")
             st.dataframe(path_user_counts_last_5_1.style.format({'Percentage': "{:.2f}%"}))
 
-            st.write("App removed Users and their Last 5 Events:")
-            st.dataframe(users_last_5_events)
+            #st.write("App removed Users and their Last 5 Events:")
+            #st.dataframe(users_last_5_events)
 
             non_app_remove_sequences['last_5_events'] = non_app_remove_sequences['event_sequence'].apply(lambda x: ' -> '.join(x.split(' -> ')[-5:]))
 
@@ -244,8 +327,8 @@ def main():
             st.write("Churn Users event flow (Last 5 Events):")
             st.dataframe(path_user_counts_last_5_2.style.format({'Percentage': "{:.2f}%"}))
 
-            st.write("Churn Users and their Last 5 Events:")
-            st.dataframe(users_last_5_events)
+            #st.write("Churn Users and their Last 5 Events:")
+            #st.dataframe(users_last_5_events)
 
 
            # Step 2: Aggregate events based on 'On_Level_Successful' and its variations
@@ -627,4 +710,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
